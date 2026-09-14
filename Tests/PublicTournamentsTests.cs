@@ -16,6 +16,7 @@ public class PublicTournamentsTests : IDisposable
 
     const long RegularSeasonID = 300, PlayoffsID = 301, CupID = 302, LateCupID = 303;
     const long PlayoffTournamentID = 30, CupTournamentID = 31, LateCupTournamentID = 32;
+    const long PoolYearPlayoffsID = 310, PoolYearTournamentID = 33;
     const long TeamA = 101, TeamB = 102, TeamC = 103, TeamD = 104, ParkID = 50;
 
     public PublicTournamentsTests()
@@ -77,6 +78,16 @@ public class PublicTournamentsTests : IDisposable
 
         // A later cup with nothing in it yet.
         db.Tournaments.Add(new Tournament { ID = LateCupTournamentID, SeasonID = LateCupID });
+
+        // Another year: the live shape that showed a premature "Won by" — an undecided
+        // marked bracket next to a marked pool whose standings exist from day one.
+        db.Seasons.Add(new Season { ID = PoolYearPlayoffsID, Year = 2028, Subseason = SeasonKind.Playoffs, Name = "2028 Playoffs", StartDate = new DateTime(2028, 8, 20) });
+        db.Tournaments.Add(new Tournament
+        {
+            ID = PoolYearTournamentID, SeasonID = PoolYearPlayoffsID,
+            Brackets = [Final(90, PoolYearTournamentID, "Main", historical: true)],
+            RoundRobins = [new TournamentRoundRobin { ID = 95, TournamentID = PoolYearTournamentID, Name = "B Side", Historical = true, SeedingConfiguration = $"1-2,Standings,Season:{RegularSeasonID}:3-4" }],
+        });
         db.SaveChanges();
     }
 
@@ -176,6 +187,22 @@ public class PublicTournamentsTests : IDisposable
         late.GamesScheduled.Should().Be(0);
         late.FirstGame.Should().BeNull();
         late.Decided.Should().BeFalse("no brackets at all is not decided");
+    }
+
+    [Fact]
+    public async Task An_undecided_tournament_lists_no_titles_even_with_a_marked_pool()
+    {
+        using var db = NewContext();
+        var service = Service(db);
+
+        // The pool leader exists as soon as the pool is seeded, so on its own it is
+        // not a title yet: TitlesOf is the raw rule, the list applies the gate.
+        var populated = (await service.LoadPopulatedAsync(PoolYearTournamentID))!;
+        service.TitlesOf(populated).Should().ContainSingle(t => t.Label == "B Side");
+
+        var summary = (await service.ListAsync(2028)).Should().ContainSingle().Subject;
+        summary.Decided.Should().BeFalse("the final has no winner");
+        summary.Titles.Should().BeEmpty("nothing is won until the tournament is decided");
     }
 
     [Fact]

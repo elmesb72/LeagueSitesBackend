@@ -70,6 +70,10 @@ public class PublicTournamentService(
                 .ToListAsync();
             var counted = games.Where(g => CountedStatuses.Contains(g.Status!.Name)).ToList();
 
+            // Titles only once the tournament is decided, the same gate the History
+            // page applies: a marked pool has a standings leader from its first day.
+            var decided = TournamentTitles.IsDecided(tournament);
+
             summaries.Add(new TournamentSummaryDto(
                 tournament.ID,
                 season.Name,
@@ -80,8 +84,8 @@ public class PublicTournamentService(
                 counted.Count > 0 ? counted.Max(g => g.Date) : null,
                 counted.Count,
                 counted.Count(g => PlayedStatuses.Contains(g.Status!.Name)),
-                TournamentTitles.IsDecided(tournament),
-                TitlesOf(tournament)));
+                decided,
+                decided ? TitlesOf(tournament) : []));
         }
         return summaries;
     }
