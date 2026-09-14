@@ -1,11 +1,16 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
+/// <summary>
+/// The year's playoffs in the public tournament shape. Kept as its own route because
+/// the Playoffs page is addressed by year, not by tournament id.
+/// </summary>
 [ApiController]
 [Route("api/Playoffs")]
 public class APIPlayoffsController(
     LeagueSitesContext dbContext,
-    ISeasonService seasonService) : ControllerBase
+    ISeasonService seasonService,
+    IPublicTournamentService publicTournaments) : ControllerBase
 {
     [ResponseCache(Duration = 30)]
     [HttpGet]
@@ -19,49 +24,28 @@ public class APIPlayoffsController(
         else
         {
             currentSeason = await dbContext.Seasons
-                .FirstOrDefaultAsync(s => s.Year == year && s.Subseason == "Playoffs");
+                .FirstOrDefaultAsync(s => s.Year == year && s.Subseason == SeasonKind.Playoffs);
         }
 
         if (currentSeason is null)
-            return Ok(new PlayoffsDto(null!, [], []));
+            return Ok(TournamentDto.Empty(null));
 
         var playoffs = await dbContext.Seasons
-            .AsSplitQuery()
+            .AsNoTracking()
             .Include(s => s.Tournaments)
-                .ThenInclude(t => t.Brackets)
-                    .ThenInclude(b => b.Rounds)
-                        .ThenInclude(r => r.Series)
-                            .ThenInclude(s => s.Games)
-                                .ThenInclude(g => g.Game)
-            .Include(s => s.Tournaments)
-                .ThenInclude(t => t.RoundRobins)
-                    .ThenInclude(r => r.Games)
-                        .ThenInclude(g => g.Game)
-            .Where(s => s.Year == currentSeason.Year && s.Subseason == "Playoffs")
+            .Where(s => s.Year == currentSeason.Year && s.Subseason == SeasonKind.Playoffs)
             .FirstOrDefaultAsync();
 
+        // No playoffs yet: answer with the season we do know about (the regular
+        // season), so the page can still name the year.
         if (playoffs is null)
-            return Ok(new PlayoffsDto(new SeasonSummaryDto(currentSeason), [], []));
+            return Ok(TournamentDto.Empty(currentSeason));
 
-        var playoffGames = await dbContext.Games
-            .AsNoTracking()
-            .Include(g => g.HostTeam)
-            .Include(g => g.VisitingTeam)
-            .Include(g => g.Status)
-            .Include(g => g.Location)
-            .Where(g => g.SeasonID == playoffs.ID)
-            .ToListAsync();
-
-        var tournament = playoffs.Tournaments.FirstOrDefault();
-        if (tournament is not null)
-            await tournament.Populate(playoffGames, dbContext);
-
+        var first = playoffs.Tournaments.OrderBy(t => t.ID).FirstOrDefault();
+        var tournament = first is null ? null : await publicTournaments.LoadPopulatedAsync(first.ID);
         if (tournament is null)
-            return Ok(new PlayoffsDto(new SeasonSummaryDto(playoffs), [], []));
+            return Ok(TournamentDto.Empty(playoffs));
 
-        return Ok(new PlayoffsDto(
-            new SeasonSummaryDto(playoffs),
-            tournament.Brackets.Select(BracketDto.From).ToList(),
-            tournament.RoundRobins.Select(RoundRobinDto.From).ToList()));
+        return Ok(publicTournaments.ToDto(tournament));
     }
 }

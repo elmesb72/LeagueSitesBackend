@@ -66,8 +66,8 @@ public class LegacySeedingPopulateTests : IDisposable
         db.Locations.Add(park);
 
         db.Seasons.AddRange(
-            new Season { ID = RegularSeasonID, Year = 2024, Subseason = "Regular Season", StartDate = new DateTime(2024, 5, 1) },
-            new Season { ID = PlayoffsID, Year = 2024, Subseason = "Playoffs", StartDate = new DateTime(2024, 8, 1) });
+            new Season { ID = RegularSeasonID, Year = 2024, Subseason = "Regular Season", Name = "2024 Regular Season", StartDate = new DateTime(2024, 5, 1) },
+            new Season { ID = PlayoffsID, Year = 2024, Subseason = "Playoffs", Name = "2024 Playoffs", StartDate = new DateTime(2024, 8, 1) });
 
         var gameId = 1000L;
         for (var i = 0; i < 4; i++)

@@ -1,7 +1,47 @@
-public record PlayoffsDto(
-    SeasonSummaryDto Season,
+/// <summary>
+/// A tournament as the public pages show it: the playoffs and mid-season cups alike.
+/// Kind is "playoffs" or "tournament"; Name is the season's name ("2026 Playoffs",
+/// "2027 Canada Day Cup"). Season is null only in the degenerate "no season at all"
+/// answer of /api/Playoffs.
+/// </summary>
+public record TournamentDto(
+    long Id,
+    string Name,
+    string Kind,
+    SeasonSummaryDto? Season,
     List<BracketDto> Brackets,
-    List<RoundRobinDto> RoundRobins);
+    List<RoundRobinDto> RoundRobins)
+{
+    /// <summary>
+    /// "Nothing to show" for a season (or none). The Playoffs endpoint answers this with
+    /// the regular season when the year has no playoffs yet, so the kind stays "playoffs"
+    /// unless the season really is a mid-season tournament.
+    /// </summary>
+    public static TournamentDto Empty(Season? season) => new(
+        0,
+        season?.Name ?? "",
+        season is not null && SeasonKind.IsTournament(season) ? "tournament" : "playoffs",
+        season is null ? null : new SeasonSummaryDto(season),
+        [],
+        []);
+}
+
+/// <summary>One line of the year's tournament list.</summary>
+public record TournamentSummaryDto(
+    long Id,
+    string Name,
+    string Kind,
+    SeasonSummaryDto Season,
+    DateTime StartDate,
+    DateTime? FirstGame,
+    DateTime? LastGame,
+    int GamesScheduled,
+    int GamesPlayed,
+    bool Decided,
+    List<TitleDto> Titles);
+
+/// <summary>A marked (Historical) stage's winner: the champion of that bracket or pool.</summary>
+public record TitleDto(string Label, TeamSummaryDto Team);
 
 /// <param name="Historical">True when this bracket's winner is the league champion shown on the History page.</param>
 /// <param name="Winner">The bracket winner once every series is decided (the same test History applies), otherwise null.</param>

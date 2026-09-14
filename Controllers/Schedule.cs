@@ -13,6 +13,7 @@ public class APIScheduleController(LeagueSitesContext dbContext, IPermissionsSer
 
         var seasons = await dbContext.Seasons
             .AsNoTracking()
+            .Include(s => s.Tournaments)
             .Where(s => s.Year == targetYear)
             .ToListAsync();
 
@@ -60,6 +61,9 @@ public class APIScheduleController(LeagueSitesContext dbContext, IPermissionsSer
         {
             year = targetYear,
             seasonStartDate = seasonStartDate != default ? seasonStartDate.ToString("yyyy-MM-dd") : null,
+            // Playoffs and mid-season tournament seasons, so rows in them can be
+            // tagged and linked to their tournament page by game.season.id.
+            tournaments = TournamentLinkDto.Of(seasons),
             games = games.Select(g => new GameSummaryDto(g)),
             locations = locations.Any()
                 ? locations.Where(l => l != null).Select(l => new LocationSummaryDto(l!))

@@ -30,6 +30,7 @@ public class PlayoffPoolStandingsTests
             ID = SeasonID,
             Year = 2026,
             Subseason = "Regular Season",
+            Name = "2026 Regular Season",
             StartDate = new DateTime(2026, 5, 1),
         };
 
@@ -64,7 +65,7 @@ public class PlayoffPoolStandingsTests
         {
             ID = 1,
             SeasonID = 14,
-            Season = new Season { ID = 14, Year = 2026, Subseason = "Playoffs" },
+            Season = new Season { ID = 14, Year = 2026, Subseason = "Playoffs", Name = "2026 Playoffs" },
             RoundRobins = [pool],
         };
     }

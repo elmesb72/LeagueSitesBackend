@@ -39,6 +39,7 @@ public class SeedingStandingsConfigTests
             ID = SeasonID,
             Year = 2025,
             Subseason = "Regular Season",
+            Name = "2025 Regular Season",
             StartDate = new DateTime(2025, 5, 1),
             StandingsJson = standingsJson,
         };

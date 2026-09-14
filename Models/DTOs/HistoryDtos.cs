@@ -7,40 +7,59 @@ public record HistoryYearDto(
     string? BestRecordAbbreviation,
     string? BestRecordResults,
     bool PlayoffsComplete,
-    bool RegularSeasonComplete)
+    bool RegularSeasonComplete,
+    List<HistoryTournamentDto> Tournaments)
 {
     public static HistoryYearDto From(Year year)
     {
         string? champion = null;
         string? championAbbr = null;
+        var tournaments = new List<HistoryTournamentDto>();
 
         if (!string.IsNullOrEmpty(year.ExceptionYearDescription))
         {
-            // Exception year — no champion or best record
+            // Exception year — no champion, no best record, no tournaments
         }
-        else if (year.PlayoffsAreComplete() && year.PlayoffsTournament != null)
+        else
         {
-            // Only brackets and pools the league has flagged Historical count,
-            // the same rule the public Playoffs page uses for its champion
-            // banner. One flagged: its winner is the champion. Several: each is
-            // listed by name. None: no champion is recorded for the year.
-            var winners = year.PlayoffsTournament.Brackets
-                .Where(b => b.Historical)
-                .Select(b => (b.Name, Team: b.GetWinner()))
-                .Concat(year.PlayoffsTournament.RoundRobins
-                    .Where(r => r.Historical && r.Standings is { Count: > 0 })
-                    .Select(r => (r.Name, Team: r.Standings!.Keys.First())))
-                .ToList();
+            // The champion column lists every title of the year, comma-joined:
+            // the playoffs' first, then each mid-season tournament's, labelled by
+            // its name. Only stages the league marked Historical count, and only
+            // once the tournament they belong to is decided — the same rule the
+            // public tournament pages use for their champion banners.
+            var titles = new List<string>();
 
-            if (winners.Count == 1)
+            if (year.PlayoffsAreComplete() && year.PlayoffsTournament != null)
             {
-                champion = winners[0].Team.FullName;
-                championAbbr = winners[0].Team.Abbreviation;
+                var playoffTitles = TournamentTitles.Of(year.PlayoffsTournament);
+                if (playoffTitles.Count == 1)
+                {
+                    titles.Add(playoffTitles[0].Team.FullName);
+                    championAbbr = playoffTitles[0].Team.Abbreviation;
+                }
+                else
+                {
+                    titles.AddRange(playoffTitles.Select(t => $"{t.Label}: {t.Team.FullName}"));
+                }
             }
-            else if (winners.Count > 1)
+
+            foreach (var season in year.TournamentSeasons)
             {
-                champion = string.Join("; ", winners.Select(w => $"{w.Name}: {w.Team.FullName}"));
+                var tournament = season.Tournaments.OrderBy(t => t.ID).FirstOrDefault();
+                if (tournament is null) continue;
+                var decided = TournamentTitles.IsDecided(tournament);
+                var shortName = SeasonKind.ShortName(season);
+                tournaments.Add(new HistoryTournamentDto(tournament.ID, season.Name, shortName, decided));
+                if (!decided) continue;
+
+                var cupTitles = TournamentTitles.Of(tournament);
+                if (cupTitles.Count == 1)
+                    titles.Add($"{shortName}: {cupTitles[0].Team.FullName}");
+                else
+                    titles.AddRange(cupTitles.Select(t => $"{shortName} {t.Label}: {t.Team.FullName}"));
             }
+
+            if (titles.Count > 0) champion = string.Join(", ", titles);
         }
 
         return new HistoryYearDto(
@@ -52,6 +71,10 @@ public record HistoryYearDto(
             year.RegularSeasonWinner?.Abbreviation,
             year.RegularSeasonWinnerResults?.ToString(),
             year.PlayoffsAreComplete(),
-            year.RegularSeasonIsComplete());
+            year.RegularSeasonIsComplete(),
+            tournaments);
     }
 }
+
+/// <summary>A mid-season tournament of the year, for the History row's links. ShortName is the name without its year.</summary>
+public record HistoryTournamentDto(long Id, string Name, string ShortName, bool Decided);

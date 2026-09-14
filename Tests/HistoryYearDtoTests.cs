@@ -12,6 +12,7 @@ public class HistoryYearDtoTests
         ID = 1,
         Year = year,
         Subseason = "Regular Season",
+        Name = $"{year} Regular Season",
         StartDate = new DateTime((int)year, 5, 1),
         Games = games,
     };
@@ -109,6 +110,7 @@ public class HistoryYearDtoTests
             ID = 2,
             Year = 2025,
             Subseason = "Playoffs",
+            Name = "2025 Playoffs",
             StartDate = new DateTime(2025, 8, 18),
             Tournaments = [tournament],
         };
@@ -160,7 +162,7 @@ public class HistoryYearDtoTests
 
         var dto = HistoryYearDto.From(year);
 
-        dto.Champion.Should().Be("Main: Alphas City Alphas; Consolation: Gammas City Gammas");
+        dto.Champion.Should().Be("Main: Alphas City Alphas, Consolation: Gammas City Gammas");
         dto.ChampionAbbreviation.Should().BeNull();
     }
 
@@ -207,6 +209,100 @@ public class HistoryYearDtoTests
 
         dto.PlayoffsComplete.Should().BeFalse();
         dto.Champion.Should().BeNull();
+    }
+
+    // --- Mid-season tournaments: their own seasons, titles folded into the column ---
+
+    static Season CupSeason(long id, string title, DateTime start, params TournamentBracket[] brackets) => new()
+    {
+        ID = id,
+        Year = 2025,
+        Subseason = SeasonKind.Tournament,
+        Name = $"2025 {title}",
+        StartDate = start,
+        Tournaments = [new Tournament { ID = id * 10, SeasonID = id, Brackets = [.. brackets] }],
+    };
+
+    static Season PlayoffSeason(params TournamentBracket[] brackets) => new()
+    {
+        ID = 2,
+        Year = 2025,
+        Subseason = SeasonKind.Playoffs,
+        Name = "2025 Playoffs",
+        StartDate = new DateTime(2025, 8, 18),
+        Tournaments = [new Tournament { ID = 1, SeasonID = 2, Brackets = [.. brackets] }],
+    };
+
+    [Fact]
+    public void A_decided_cup_joins_the_champion_column_after_the_playoffs_labelled_by_its_name()
+    {
+        var year = new Year(2025,
+        [
+            PlayoffSeason(Bracket(1, "Main", historical: true, Series(1, TeamA, TeamB))),
+            CupSeason(5, "Canada Day Cup", new DateTime(2025, 7, 1), Bracket(3, "Final", historical: true, Series(3, TeamC, TeamD))),
+        ]);
+
+        var dto = HistoryYearDto.From(year);
+
+        dto.Champion.Should().Be("Alphas City Alphas, Canada Day Cup: Gammas City Gammas");
+        dto.ChampionAbbreviation.Should().Be("ALP", "the playoffs champion's, as before");
+        dto.Tournaments.Should().ContainSingle().Which.Should().BeEquivalentTo(
+            new HistoryTournamentDto(50, "2025 Canada Day Cup", "Canada Day Cup", Decided: true));
+    }
+
+    [Fact]
+    public void An_undecided_or_unmarked_cup_is_listed_for_its_link_but_adds_no_title()
+    {
+        var year = new Year(2025,
+        [
+            PlayoffSeason(Bracket(1, "Main", historical: true, Series(1, TeamA, TeamB))),
+            CupSeason(5, "Canada Day Cup", new DateTime(2025, 7, 1), Bracket(3, "Final", historical: true, Series(3, TeamC, TeamD, decided: false))),
+            CupSeason(6, "Labour Day Classic", new DateTime(2025, 9, 1), Bracket(4, "Final", historical: false, Series(4, TeamD, TeamC))),
+        ]);
+
+        var dto = HistoryYearDto.From(year);
+
+        dto.Champion.Should().Be("Alphas City Alphas");
+        dto.Tournaments.Select(t => (t.ShortName, t.Decided)).Should().Equal(
+            ("Canada Day Cup", false), ("Labour Day Classic", true));
+    }
+
+    [Fact]
+    public void A_cup_with_several_marked_stages_labels_each_with_the_cups_name()
+    {
+        var year = new Year(2025,
+        [
+            CupSeason(5, "Canada Day Cup", new DateTime(2025, 7, 1),
+                Bracket(3, "Main", historical: true, Series(3, TeamA, TeamB)),
+                Bracket(4, "B Final", historical: true, Series(4, TeamC, TeamD))),
+        ]);
+
+        var dto = HistoryYearDto.From(year);
+
+        dto.Champion.Should().Be("Canada Day Cup Main: Alphas City Alphas, Canada Day Cup B Final: Gammas City Gammas");
+        dto.ChampionAbbreviation.Should().BeNull("no playoffs champion this year");
+        dto.PlayoffsComplete.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Cup_games_do_not_touch_the_regular_season_record_or_its_completeness()
+    {
+        var regularGames = new List<Game>
+        {
+            TestDataHelper.MakeGame(TeamA, TeamB, "Played", scoreHost: 5, scoreVisitor: 3),
+            TestDataHelper.MakeGame(TeamB, TeamA, "Played", scoreHost: 2, scoreVisitor: 4),
+        };
+        var regular = MakeRegularSeason(2025, regularGames);
+        var cup = CupSeason(5, "Canada Day Cup", new DateTime(2025, 7, 1), Bracket(3, "Final", historical: true, Series(3, TeamB, TeamA)));
+        // The cup has an unplayed game and a decided (by fixture) final won by the Betas.
+        cup.Games = [TestDataHelper.MakeGame(TeamB, TeamA, "Upcoming")];
+
+        var dto = HistoryYearDto.From(new Year(2025, [regular, cup]));
+
+        dto.RegularSeasonComplete.Should().BeTrue("an upcoming cup game is not a regular-season game");
+        dto.BestRecord.Should().Be("Alphas City Alphas");
+        dto.BestRecordResults.Should().Be("(2-0-0)", "the cup's games are not counted");
+        dto.Champion.Should().Be("Canada Day Cup: Betas City Betas");
     }
 
     [Fact]

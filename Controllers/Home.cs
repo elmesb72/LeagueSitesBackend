@@ -33,9 +33,19 @@ public class APIHomeController(
         var closestSeason = await seasonService.GetClosestSeasonAsync();
         Standings? standings = null;
         bool isPlayoffs = false;
+        // This year's mid-season tournaments, for a callout beside the playoffs one.
+        // Like isPlayoffs, present for the rest of the year once the cup exists.
+        List<TournamentLinkDto> tournaments = [];
 
         if (closestSeason is not null)
         {
+            var cupSeasons = await dbContext.Seasons
+                .AsNoTracking()
+                .Include(s => s.Tournaments)
+                .Where(s => s.Year == closestSeason.Year && s.Subseason == SeasonKind.Tournament)
+                .ToListAsync();
+            tournaments = TournamentLinkDto.Of(cupSeasons);
+
             var seasonGames = await dbContext.Games
                 .AsNoTracking()
                 .Include(g => g.HostTeam)
@@ -66,6 +76,7 @@ public class APIHomeController(
             }),
             standings = standings?.ToDto(),
             isPlayoffs,
+            tournaments,
             canPost
         });
     }

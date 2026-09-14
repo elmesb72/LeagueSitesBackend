@@ -27,6 +27,9 @@ public class Year
             return Playoffs.Tournaments.FirstOrDefault();
         }
     }
+    /// <summary>The year's mid-season tournaments (cups), each its own season, in start-date order.</summary>
+    public IEnumerable<Season> TournamentSeasons =>
+        Seasons.Where(SeasonKind.IsTournament).OrderBy(s => s.StartDate).ThenBy(s => s.ID);
     public string? ExceptionYearDescription { get; set; }
 
     public Year(long calendarYear, List<Season> seasons)

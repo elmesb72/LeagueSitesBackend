@@ -39,6 +39,14 @@ public class APIHistoryController(LeagueSitesContext dbContext) : ControllerBase
             {
                 await year.PlayoffsTournament.Populate([.. year.Playoffs.Games], dbContext);
             }
+            // Mid-season tournaments are their own seasons; resolve each one so its
+            // titles can join the champion column.
+            foreach (var cup in year.TournamentSeasons)
+            {
+                var tournament = cup.Tournaments.OrderBy(t => t.ID).FirstOrDefault();
+                if (tournament is not null)
+                    await tournament.Populate([.. cup.Games], dbContext);
+            }
         }
 
         // Add/overwrite from DB-stored site config history

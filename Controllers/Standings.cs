@@ -38,10 +38,18 @@ public class APIStandingsController(
         var standings = new Standings(games, StandingsConfigService.Parse(season.StandingsJson));
         standings.CalculateStreaks();
 
+        // The year's playoffs and mid-season tournaments, so the page can point at them.
+        var otherSeasons = await dbContext.Seasons
+            .AsNoTracking()
+            .Include(s => s.Tournaments)
+            .Where(s => s.Year == season.Year && s.Subseason != SeasonKind.RegularSeason)
+            .ToListAsync();
+
         return Ok(new
         {
             season = new SeasonSummaryDto(season),
-            standings = standings.ToDto()
+            standings = standings.ToDto(),
+            tournaments = TournamentLinkDto.Of(otherSeasons)
         });
     }
 }

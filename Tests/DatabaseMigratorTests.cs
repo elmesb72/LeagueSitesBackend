@@ -68,11 +68,12 @@ public class DatabaseMigratorTests : IDisposable
     {
         var migrations = DatabaseMigrator.LoadEmbeddedMigrations();
 
-        migrations.Select(m => m.Version).Should().Equal(1, 2, 3, 4);
+        migrations.Select(m => m.Version).Should().Equal(1, 2, 3, 4, 5);
         migrations[0].Name.Should().Be("baseline");
         migrations[1].Name.Should().Be("standings_config");
         migrations[2].Name.Should().Be("per_season_standings");
         migrations[3].Name.Should().Be("drop_site_standings");
+        migrations[4].Name.Should().Be("season_name");
         migrations.Should().OnlyContain(m => !string.IsNullOrWhiteSpace(m.Sql));
     }
 
@@ -83,13 +84,38 @@ public class DatabaseMigratorTests : IDisposable
 
         Migrate(ConnectionString);
 
-        UserVersion().Should().Be(4);
+        UserVersion().Should().Be(5);
         Scalar("SELECT COUNT(*) FROM SiteConfig").Should().Be(1, "the baseline seeds a placeholder config");
         Scalar("SELECT COUNT(*) FROM GameStatus").Should().BeGreaterThan(0, "statuses are universal seed data");
         Scalar("SELECT COUNT(*) FROM pragma_table_info('SiteConfig') WHERE name='StandingsJson'")
             .Should().Be(0, "the site-level standings column (0002) is dropped again by 0004");
         Scalar("SELECT COUNT(*) FROM pragma_table_info('Season') WHERE name='StandingsJson'")
             .Should().Be(1, "migration 0003 adds the per-season standings column");
+        Scalar("SELECT COUNT(*) FROM pragma_table_info('Season') WHERE name='Name'")
+            .Should().Be(1, "migration 0005 adds the stored season name column");
+    }
+
+    [Fact]
+    public void ExistingSeasons_KeepTheNameTheyAlwaysDisplayed()
+    {
+        // Names used to be computed as "{Year} {Subseason}"; 0005 stores them, so
+        // every legacy row must come out with exactly that text, never '' or NULL.
+        CreateLegacyDatabase();
+        using (var connection = new SqliteConnection(ConnectionString))
+        {
+            connection.Open();
+            using var insert = connection.CreateCommand();
+            insert.CommandText =
+                "INSERT INTO Season (Year, Subseason, StartDate) VALUES (2025, 'Playoffs', '2025-08-18');" +
+                "INSERT INTO Season (Year, Subseason, StartDate) VALUES (2025, 'Regular Season', '2025-05-01');";
+            insert.ExecuteNonQuery();
+        }
+
+        Migrate(ConnectionString);
+
+        Scalar("SELECT COUNT(*) FROM Season WHERE Name = '2025 Playoffs'").Should().Be(1);
+        Scalar("SELECT COUNT(*) FROM Season WHERE Name = '2025 Regular Season'").Should().Be(1);
+        Scalar("SELECT COUNT(*) FROM Season WHERE Name = '' OR Name IS NULL").Should().Be(0);
     }
 
     [Fact]
@@ -100,7 +126,7 @@ public class DatabaseMigratorTests : IDisposable
 
         Migrate(ConnectionString);
 
-        UserVersion().Should().Be(4);
+        UserVersion().Should().Be(5);
         Scalar("SELECT COUNT(*) FROM pragma_table_info('SiteConfig') WHERE name='StandingsJson'")
             .Should().Be(0, "0002 added the column and 0004 dropped it");
         Scalar("SELECT COUNT(*) FROM pragma_table_info('Season') WHERE name='StandingsJson'")
@@ -149,7 +175,7 @@ public class DatabaseMigratorTests : IDisposable
 
         Migrate(ConnectionString);
 
-        UserVersion().Should().Be(4);
+        UserVersion().Should().Be(5);
         Scalar("SELECT COUNT(*) FROM pragma_table_info('SiteConfig') WHERE name='StandingsJson'")
             .Should().Be(0, "0004 drops the manually added column too");
     }
@@ -165,7 +191,7 @@ public class DatabaseMigratorTests : IDisposable
 
         Migrate(ConnectionString);
 
-        UserVersion().Should().Be(4);
+        UserVersion().Should().Be(5);
         Directory.GetFiles(Path.GetDirectoryName(dbPath)!, Path.GetFileName(dbPath) + "*.bak")
             .Should().BeEmpty("an up-to-date database needs no backup");
     }
@@ -276,5 +302,19 @@ public class DatabaseMigratorTests : IDisposable
         context.Teams.Single().Hidden.Should().BeTrue();
         context.GameStatuses.Count().Should().BeGreaterThan(0);
         context.Seasons.ToList().Should().BeEmpty();
+
+        // A tournament season round-trips its title through EF and names itself by it.
+        context.Seasons.Add(new Season
+        {
+            Year = 2027,
+            Subseason = SeasonKind.Tournament,
+            Name = "2027 Canada Day Cup",
+            StartDate = new DateTime(2027, 7, 1),
+        });
+        context.SaveChanges();
+        using var fresh = new LeagueSitesContext(options);
+        var cup = fresh.Seasons.Single();
+        cup.Name.Should().Be("2027 Canada Day Cup");
+        cup.Subseason.Should().Be(SeasonKind.Tournament);
     }
 }

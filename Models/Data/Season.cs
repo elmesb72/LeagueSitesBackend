@@ -8,14 +8,13 @@
 
     public long ID { get; set; }
     public long Year { get; set; }
+    /// <summary>The kind of season: one of the SeasonKind constants.</summary>
     public required string Subseason { get; set; }
-    public string Name
-    {
-        get
-        {
-            return $"{Year} {Subseason}";
-        }
-    }
+    /// <summary>
+    /// The season's display name, stored: "2026 Regular Season", "2026 Playoffs",
+    /// "2027 Canada Day Cup". Set at creation (see SeasonKind.NameFor).
+    /// </summary>
+    public required string Name { get; set; }
     public DateTime StartDate { get; set; }
 
     /// <summary>

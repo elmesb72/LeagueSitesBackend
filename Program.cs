@@ -27,6 +27,8 @@ builder.Services.AddScoped<IPermissionsService, PermissionsService>();
 builder.Services.AddScoped<ISeasonService, SeasonService>();
 builder.Services.AddScoped<IScheduleImportService, ScheduleImportService>();
 builder.Services.AddScoped<ITournamentService, TournamentService>();
+builder.Services.AddScoped<ITournamentSeasonService, TournamentSeasonService>();
+builder.Services.AddScoped<IPublicTournamentService, PublicTournamentService>();
 builder.Services.AddLeagueSitesAuthorization();
 
 builder.Services.AddControllers().AddJsonOptions(o =>

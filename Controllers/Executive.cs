@@ -7,7 +7,8 @@ using Microsoft.EntityFrameworkCore;
 [Authorize(Policy = "Scope:Executive,Webmaster")]
 public class APIExecutiveController(
     LeagueSitesContext dbContext,
-    IScheduleImportService scheduleImportService) : ControllerBase
+    IScheduleImportService scheduleImportService,
+    ITournamentSeasonService tournamentSeasonService) : ControllerBase
 {
     [HttpGet("Dashboard")]
     public async Task<IActionResult> Dashboard()
@@ -62,6 +63,18 @@ public class APIExecutiveController(
             .Include(s => s.Tournaments)
                 .ThenInclude(t => t.RoundRobins)
             .FirstOrDefaultAsync();
+
+        // Mid-season tournaments: each is its own season of kind Tournament.
+        var currentTournamentSeasons = await dbContext.Seasons
+            .AsNoTracking()
+            .Where(s => s.Subseason == SeasonKind.Tournament && s.Year == DateTime.Now.Year)
+            .Include(s => s.Tournaments)
+                .ThenInclude(t => t.Brackets)
+            .Include(s => s.Tournaments)
+                .ThenInclude(t => t.RoundRobins)
+            .OrderBy(s => s.StartDate)
+            .ThenBy(s => s.ID)
+            .ToListAsync();
 
         int gamesScheduled = 0;
         int gamesPlayed = 0;
@@ -137,7 +150,17 @@ public class APIExecutiveController(
             {
                 season = new SeasonSummaryDto(currentPlayoffs),
                 tournaments = playoffTournaments
-            } : null
+            } : null,
+            currentTournaments = currentTournamentSeasons.Select(s => new
+            {
+                season = new SeasonSummaryDto(s),
+                tournaments = s.Tournaments.Select(t => new
+                {
+                    id = t.ID,
+                    brackets = t.Brackets.Select(b => new { b.ID, b.Name }),
+                    roundRobins = t.RoundRobins.Select(r => new { r.ID, r.Name })
+                }).ToList()
+            }).ToList()
         });
     }
 
@@ -161,7 +184,8 @@ public class APIExecutiveController(
         var season = new Season
         {
             Year = DateTime.Now.Year,
-            Subseason = "Regular Season",
+            Subseason = SeasonKind.RegularSeason,
+            Name = SeasonKind.NameFor(DateTime.Now.Year, SeasonKind.RegularSeason),
             StartDate = DateTime.Now.Date,
             StandingsJson = string.IsNullOrWhiteSpace(inheritedRules)
                 ? StandingsConfigService.Serialize(new StandingsConfig())
@@ -226,7 +250,8 @@ public class APIExecutiveController(
         var season = new Season
         {
             Year = DateTime.Now.Year,
-            Subseason = "Playoffs",
+            Subseason = SeasonKind.Playoffs,
+            Name = SeasonKind.NameFor(DateTime.Now.Year, SeasonKind.Playoffs),
             StartDate = DateTime.Now.Date,
             // Playoffs share the year's rules: inherit from the regular season.
             StandingsJson = string.IsNullOrWhiteSpace(regularSeason.StandingsJson)
@@ -248,6 +273,65 @@ public class APIExecutiveController(
         await dbContext.SaveChangesAsync();
 
         return Ok(new { seasonID = season.ID, tournamentID = tournament.ID });
+    }
+
+    /// <summary>
+    /// Creates a mid-season tournament: a season of kind Tournament (its games never
+    /// count toward the regular season) with one tournament in it, so the executive
+    /// lands on the same tournament page the playoffs use.
+    /// </summary>
+    [HttpPost("Season/Tournament")]
+    public async Task<IActionResult> CreateTournamentSeason([FromBody] TournamentSeasonCreateDto dto)
+    {
+        if (!DateTime.TryParse(dto.StartDate, out var startDate))
+            return BadRequest("Give the tournament a start date.");
+
+        try
+        {
+            var (season, tournament) = await tournamentSeasonService.CreateAsync(dto.Name ?? "", startDate);
+
+            var uid = Convert.ToInt64(User.Claims.First(c => c.Type == "UserID").Value);
+            dbContext.Events.Add(Event.Log(
+                EventType.Update, uid,
+                "/api/Executive/Season/Tournament", $"Created tournament {season.Name}",
+                new { season.ID, season.Year, season.Name, TournamentID = tournament.ID }));
+            await dbContext.SaveChangesAsync();
+
+            return Ok(new { seasonID = season.ID, tournamentID = tournament.ID });
+        }
+        catch (TournamentFormatException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Removes a mid-season tournament that has no live games: its season, tournament,
+    /// brackets, pools and any games already in the recovery bin.
+    /// </summary>
+    [HttpDelete("Season/Tournament/{seasonId:long}")]
+    public async Task<IActionResult> DeleteTournamentSeason([FromRoute] long seasonId)
+    {
+        var outcome = await tournamentSeasonService.DeleteAsync(seasonId);
+        switch (outcome)
+        {
+            case TournamentSeasonDeletion.NotFound:
+                return NotFound($"Tournament season {seasonId} not found.");
+            case TournamentSeasonDeletion.LiveGames live:
+                return Conflict(live.Count == 1
+                    ? "1 game is still scheduled in this tournament. Remove it first."
+                    : $"{live.Count} games are still scheduled in this tournament. Remove them first.");
+            case TournamentSeasonDeletion.Deleted deleted:
+                var uid = Convert.ToInt64(User.Claims.First(c => c.Type == "UserID").Value);
+                dbContext.Events.Add(Event.Log(
+                    EventType.Update, uid,
+                    $"/api/Executive/Season/Tournament/{seasonId}", $"Deleted tournament {deleted.Name}",
+                    new { seasonId, deleted.BinnedGamesPurged, deleted.Brackets, deleted.Pools }));
+                await dbContext.SaveChangesAsync();
+                return Ok(new { deleted.Name, deleted.BinnedGamesPurged, deleted.Brackets, deleted.Pools });
+            default:
+                return StatusCode(500);
+        }
     }
 
     [HttpPatch("Season/StartDate")]
@@ -492,6 +576,8 @@ public class APIExecutiveController(
 }
 
 public record SeasonStartDateDto(string StartDate);
+/// <summary>The tournament's name ("Canada Day Cup"); its season is named "{year} {Name}".</summary>
+public record TournamentSeasonCreateDto(string? Name, string StartDate);
 
 public record StandingsRulesUpdateDto(int Year, StandingsConfig Standings);
 
